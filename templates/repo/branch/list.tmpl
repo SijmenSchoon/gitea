@@ -8,20 +8,18 @@
 			{{.i18n.Tr "repo.default_branch"}}
 		</h4>
 
+		{{if $.DefaultBranch}}
 		<div class="ui attached table segment">
 			<table class="ui very basic striped fixed table single line">
 				<tbody>
 					<tr>
 						<td>
-						{{range .Branches}}
-							{{if eq .Name $.DefaultBranch}}
-								{{if .IsProtected}}
-									{{svg "octicon-shield-lock" 16}}
-								{{end}}
-								<a href="{{$.RepoLink}}/src/branch/{{$.DefaultBranch | EscapePound}}">{{$.DefaultBranch}}</a>
-								<p class="info">{{svg "octicon-git-commit" 16}}<a href="{{$.RepoLink}}/commit/{{.Commit.ID.String}}">{{ShortSha .Commit.ID.String}}</a> · <span class="commit-message">{{RenderCommitMessage .Commit.CommitMessage $.RepoLink $.Repository.ComposeMetas}}</span> · {{$.i18n.Tr "org.repo_updated"}} {{TimeSince .Commit.Committer.When $.i18n.Lang}}</p>
-							{{end}}
+						{{$br := $.DefaultBranch}}
+						{{if $br.IsProtected}}
+							{{svg "octicon-shield-lock" 16}}
 						{{end}}
+							<a href="{{$.RepoLink}}/src/branch/{{$.DefaultBranch | EscapePound}}">{{$br.Name}}</a>
+							<p class="info">{{svg "octicon-git-commit" 16}}<a href="{{$.RepoLink}}/commit/{{.Commit.ID.String}}">{{ShortSha $br.Commit.ID.String}}</a> · <span class="commit-message">{{RenderCommitMessage $br.Commit.CommitMessage $.RepoLink $.Repository.ComposeMetas}}</span> · {{$.i18n.Tr "org.repo_updated"}} {{TimeSince $br.Commit.Committer.When $.i18n.Lang}}</p>
 						</td>
 						<td class="right aligned overflow-visible">
 							<div class="ui basic jump dropdown icon button poping up" data-content="{{$.i18n.Tr "repo.branch.download" ($.DefaultBranch)}}" data-variation="tiny inverted" data-position="top right">
@@ -36,6 +34,7 @@
 				</tbody>
 			</table>
 		</div>
+		{{end}}
 
 		{{if gt (len .Branches) 1}}
 			<h4 class="ui top attached header">
@@ -45,7 +44,7 @@
 				<table class="ui very basic striped fixed table single line">
 					<tbody>
 						{{range .Branches}}
-							{{if ne .Name $.DefaultBranch}}
+							{{if ne .Name $.DefaultBranch.Name}}
 								<tr>
 									<td class="six wide">
 									{{if .IsDeleted}}
@@ -126,6 +125,7 @@
 				</table>
 			</div>
 		{{end}}
+		{{template "base/paginate" .}}
 	</div>
 </div>
 

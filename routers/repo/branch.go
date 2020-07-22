@@ -40,9 +40,20 @@ type Branch struct {
 
 // Branches render repository branch page
 func Branches(ctx *context.Context) {
+	page := ctx.QueryInt("page")
+	if page <= 1 {
+		page = 1
+	}
+
+	pageSize := ctx.QueryInt("limit")
+	if pageSize <= 0 {
+		// TODO Create constant for this (or is this fine?)
+		pageSize = git.CommitsRangeSize
+	}
+
 	ctx.Data["Title"] = "Branches"
 	ctx.Data["IsRepoToolbarBranches"] = true
-	ctx.Data["DefaultBranch"] = ctx.Repo.Repository.DefaultBranch
+	ctx.Data["DefaultBranch"] = repo_module.GetBranch(ctx.Repo.Repository, ctx.Repo.Repository.DefaultBranch)
 	ctx.Data["AllowsPulls"] = ctx.Repo.Repository.AllowsPulls()
 	ctx.Data["IsWriter"] = ctx.Repo.CanWrite(models.UnitTypeCode)
 	ctx.Data["IsMirror"] = ctx.Repo.Repository.IsMirror
@@ -50,7 +61,13 @@ func Branches(ctx *context.Context) {
 	ctx.Data["PageIsViewCode"] = true
 	ctx.Data["PageIsBranches"] = true
 
-	ctx.Data["Branches"] = loadBranches(ctx)
+	branches, count := loadBranches(ctx, page, pageSize)
+	ctx.Data["Branches"] = branches
+	
+	pager := context.NewPagination(count, git.CommitsRangeSize, page, 5)
+	pager.SetDefaultParams(ctx)
+	ctx.Data["Page"] = pager
+
 	ctx.HTML(200, tplBranch)
 }
 
@@ -180,17 +197,26 @@ func deleteBranch(ctx *context.Context, branchName string) error {
 	return nil
 }
 
-func loadBranches(ctx *context.Context) []*Branch {
-	rawBranches, err := repo_module.GetBranches(ctx.Repo.Repository)
+func loadBranches(ctx *context.Context, page int, count int) ([]*Branch, int) {
+	rawBranchesAll, err := repo_module.GetBranches(ctx.Repo.Repository)
 	if err != nil {
 		ctx.ServerError("GetBranches", err)
-		return nil
+		return nil, 0
 	}
+
+	offset := (page - 1) * count
+	if offset > len(rawBranchesAll) {
+		return []*Branch{}, 0
+	}
+	if offset + count > len(rawBranchesAll) {
+		count = len(rawBranchesAll) - offset
+	}
+	rawBranches := rawBranchesAll[offset:offset + count]
 
 	protectedBranches, err := ctx.Repo.Repository.GetProtectedBranches()
 	if err != nil {
 		ctx.ServerError("GetProtectedBranches", err)
-		return nil
+		return nil, 0
 	}
 
 	repoIDToRepo := map[int64]*models.Repository{}
@@ -204,7 +230,7 @@ func loadBranches(ctx *context.Context) []*Branch {
 		commit, err := rawBranches[i].GetCommit()
 		if err != nil {
 			ctx.ServerError("GetCommit", err)
-			return nil
+			return nil, 0
 		}
 
 		var isProtected bool
@@ -219,13 +245,13 @@ func loadBranches(ctx *context.Context) []*Branch {
 		divergence, divergenceError := repofiles.CountDivergingCommits(ctx.Repo.Repository, branchName)
 		if divergenceError != nil {
 			ctx.ServerError("CountDivergingCommits", divergenceError)
-			return nil
+			return nil, 0
 		}
 
 		pr, err := models.GetLatestPullRequestByHeadInfo(ctx.Repo.Repository.ID, branchName)
 		if err != nil {
 			ctx.ServerError("GetLatestPullRequestByHeadInfo", err)
-			return nil
+			return nil, 0
 		}
 		headCommit := commit.ID.String()
 
@@ -234,13 +260,13 @@ func loadBranches(ctx *context.Context) []*Branch {
 			pr.HeadRepo = ctx.Repo.Repository
 			if err := pr.LoadIssue(); err != nil {
 				ctx.ServerError("pr.LoadIssue", err)
-				return nil
+				return nil, 0
 			}
 			if repo, ok := repoIDToRepo[pr.BaseRepoID]; ok {
 				pr.BaseRepo = repo
 			} else if err := pr.LoadBaseRepo(); err != nil {
 				ctx.ServerError("pr.LoadBaseRepo", err)
-				return nil
+				return nil, 0
 			} else {
 				repoIDToRepo[pr.BaseRepoID] = pr.BaseRepo
 			}
@@ -252,7 +278,7 @@ func loadBranches(ctx *context.Context) []*Branch {
 					baseGitRepo, err = git.OpenRepository(pr.BaseRepo.RepoPath())
 					if err != nil {
 						ctx.ServerError("OpenRepository", err)
-						return nil
+						return nil, 0
 					}
 					defer baseGitRepo.Close()
 					repoIDToGitRepo[pr.BaseRepoID] = baseGitRepo
@@ -260,7 +286,7 @@ func loadBranches(ctx *context.Context) []*Branch {
 				pullCommit, err := baseGitRepo.GetRefCommitID(pr.GetGitRefName())
 				if err != nil && !git.IsErrNotExist(err) {
 					ctx.ServerError("GetBranchCommitID", err)
-					return nil
+					return nil, 0
 				}
 				if err == nil && headCommit != pullCommit {
 					// the head has moved on from the merge - we shouldn't delete
@@ -287,12 +313,12 @@ func loadBranches(ctx *context.Context) []*Branch {
 		deletedBranches, err := getDeletedBranches(ctx)
 		if err != nil {
 			ctx.ServerError("getDeletedBranches", err)
-			return nil
+			return nil, 0
 		}
 		branches = append(branches, deletedBranches...)
 	}
 
-	return branches
+	return branches, len(rawBranchesAll)
 }
 
 func getDeletedBranches(ctx *context.Context) ([]*Branch, error) {
